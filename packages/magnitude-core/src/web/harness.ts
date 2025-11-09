@@ -19,6 +19,25 @@ export interface WebHarnessOptions {
     switchTabsOnActivity?: boolean  // Whether to automatically switch tabs when user activity is detected vs only if switchTab is used
 }
 
+type ConsoleMessageType = 'log' | 'debug' | 'info' | 'error' | 'warning' | 'dir' | 'dirxml' | 'table' | 'trace' | 'clear' | 'startGroup' | 'startGroupCollapsed' | 'endGroup' | 'assert' | 'profile' | 'profileEnd' | 'count' | 'timeEnd';
+
+export interface ConsoleMessage {
+    type: ConsoleMessageType;
+    text: string;
+    timestamp: number;
+}
+
+export interface NetworkRequest {
+    url: string;
+    method: string;
+    status?: number;
+    statusText?: string;
+    resourceType: string;
+    timestamp: number;
+    requestHeaders?: Record<string, string>;
+    responseHeaders?: Record<string, string>;
+}
+
 export interface WebHarnessEvents {
     'activePageChanged': (page: Page) => Promise<void>;
 }
@@ -34,6 +53,8 @@ export class WebHarness { // implements StateComponent
     public readonly visualizer: ActionVisualizer;
     private transformer: DOMTransformer;
     private tabs: TabManager;
+    private consoleLogs: ConsoleMessage[] = [];
+    private networkRequests: NetworkRequest[] = [];
 
     public readonly events: EventEmitter<WebHarnessEvents> = new EventEmitter();
 
@@ -67,7 +88,40 @@ export class WebHarness { // implements StateComponent
         this.stability.setActivePage(page);
         await this.visualizer.setActivePage(page);
         this.transformer.setActivePage(page);
+        this.setupPageListeners(page);
         this.events.emit('activePageChanged', page);
+    }
+
+    private setupPageListeners(page: Page) {
+        // Console listener
+        page.on('console', (msg) => {
+            this.consoleLogs.push({
+                type: msg.type() as ConsoleMessage['type'],
+                text: msg.text(),
+                timestamp: Date.now()
+            });
+        });
+
+        // Network listeners
+        page.on('request', (request) => {
+            const networkRequest: NetworkRequest = {
+                url: request.url(),
+                method: request.method(),
+                resourceType: request.resourceType(),
+                timestamp: Date.now(),
+                requestHeaders: request.headers()
+            };
+            this.networkRequests.push(networkRequest);
+        });
+
+        page.on('response', async (response) => {
+            const request = this.networkRequests.find(r => r.url === response.url() && !r.status);
+            if (request) {
+                request.status = response.status();
+                request.statusText = response.statusText();
+                request.responseHeaders = response.headers();
+            }
+        });
     }
 
     async retrieveTabState(): Promise<TabState> {
@@ -384,6 +438,24 @@ export class WebHarness { // implements StateComponent
         await this.page.keyboard.press('Tab')
     }
 
+    async copy() {
+        await this.page.keyboard.down('ControlOrMeta');
+        await this.page.keyboard.press('KeyC');
+        await this.page.keyboard.up('ControlOrMeta');
+    }
+
+    async paste() {
+        await this.page.keyboard.down('ControlOrMeta');
+        await this.page.keyboard.press('KeyV');
+        await this.page.keyboard.up('ControlOrMeta');
+    }
+
+    async setClipboard(text: string) {
+        await this.page.evaluate((text) => {
+            navigator.clipboard.writeText(text);
+        }, text);
+    }
+
     async goBack() {
         await this.page.goBack();
     }
@@ -406,6 +478,40 @@ export class WebHarness { // implements StateComponent
 
     async waitForStability(timeout?: number): Promise<void> {
         await this.stability.waitForStability(timeout);
+    }
+
+    // Inspection methods
+    async getPageHTML(): Promise<string> {
+        return await this.page.content();
+    }
+
+    async getAccessibilityTree(): Promise<any> {
+        const snapshot = await this.page.accessibility.snapshot();
+        return snapshot;
+    }
+
+    getConsoleLogs(clear: boolean = false): ConsoleMessage[] {
+        const logs = [...this.consoleLogs];
+        if (clear) {
+            this.consoleLogs = [];
+        }
+        return logs;
+    }
+
+    getNetworkRequests(clear: boolean = false): NetworkRequest[] {
+        const requests = [...this.networkRequests];
+        if (clear) {
+            this.networkRequests = [];
+        }
+        return requests;
+    }
+
+    clearConsoleLogs(): void {
+        this.consoleLogs = [];
+    }
+
+    clearNetworkRequests(): void {
+        this.networkRequests = [];
     }
 
     // async applyTransformations() {

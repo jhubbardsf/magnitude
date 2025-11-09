@@ -94,6 +94,19 @@ const KeyPressActionSchema = z.object({
     key: z.enum(['Enter', 'Tab', 'Backspace'])
 });
 
+const CopyActionSchema = z.object({
+    type: z.literal('copy')
+});
+
+const PasteActionSchema = z.object({
+    type: z.literal('paste')
+});
+
+const SetClipboardActionSchema = z.object({
+    type: z.literal('set_clipboard'),
+    text: z.string()
+});
+
 const ActionSchema = z.discriminatedUnion('type', [
     ClickActionSchema,
     RightClickActionSchema,
@@ -104,7 +117,10 @@ const ActionSchema = z.discriminatedUnion('type', [
     SwitchTabActionSchema,
     NewTabActionSchema,
     NavigateActionSchema,
-    KeyPressActionSchema
+    KeyPressActionSchema,
+    CopyActionSchema,
+    PasteActionSchema,
+    SetClipboardActionSchema
 ]);
 
 const ConnectBrowserSchema = z.object({
@@ -169,6 +185,48 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 inputSchema: {
                     type: 'object',
                     properties: {},
+                },
+            },
+            {
+                name: 'get_page_html',
+                description: 'Get the full HTML content of the current page',
+                inputSchema: {
+                    type: 'object',
+                    properties: {},
+                },
+            },
+            {
+                name: 'get_accessibility_tree',
+                description: 'Get the accessibility tree of the current page, useful for finding elements and understanding page structure',
+                inputSchema: {
+                    type: 'object',
+                    properties: {},
+                },
+            },
+            {
+                name: 'get_console_logs',
+                description: 'Get console messages from the browser. Optionally clear the log buffer after retrieving.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        clear: {
+                            type: 'boolean',
+                            description: 'Whether to clear the console log buffer after retrieving (default: false)',
+                        },
+                    },
+                },
+            },
+            {
+                name: 'get_network_requests',
+                description: 'Get network requests made by the page. Optionally clear the request buffer after retrieving.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        clear: {
+                            type: 'boolean',
+                            description: 'Whether to clear the network request buffer after retrieving (default: false)',
+                        },
+                    },
                 },
             },
         ],
@@ -304,6 +362,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             else if (action.key.toLowerCase() === 'tab') await harness.tab();
                             else if (action.key.toLowerCase() === 'backspace') await harness.backspace();
                             break;
+                        case 'copy':
+                            await harness.copy();
+                            break;
+                        case 'paste':
+                            await harness.paste();
+                            break;
+                        case 'set_clipboard':
+                            await harness.setClipboard(action.text);
+                            break;
                         default:
                             throw new Error(`Unknown action type: ${(action as any).type}`);
                     }
@@ -344,6 +411,60 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             mimeType: 'image/png'
                         }
                     ]
+                };
+            }
+
+            case 'get_page_html': {
+                if (!harness) {
+                    throw new Error('No browser connected. Use open_browser first.');
+                }
+                const html = await harness.getPageHTML();
+                return {
+                    content: [{
+                        type: 'text',
+                        text: html
+                    }]
+                };
+            }
+
+            case 'get_accessibility_tree': {
+                if (!harness) {
+                    throw new Error('No browser connected. Use open_browser first.');
+                }
+                const tree = await harness.getAccessibilityTree();
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify(tree, null, 2)
+                    }]
+                };
+            }
+
+            case 'get_console_logs': {
+                if (!harness) {
+                    throw new Error('No browser connected. Use open_browser first.');
+                }
+                const clear = (args as any)?.clear ?? false;
+                const logs = harness.getConsoleLogs(clear);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify(logs, null, 2)
+                    }]
+                };
+            }
+
+            case 'get_network_requests': {
+                if (!harness) {
+                    throw new Error('No browser connected. Use open_browser first.');
+                }
+                const clear = (args as any)?.clear ?? false;
+                const requests = harness.getNetworkRequests(clear);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify(requests, null, 2)
+                    }]
                 };
             }
 

@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "magnitude",
@@ -38,7 +39,7 @@
     },
     "packages/magnitude-core": {
       "name": "magnitude-core",
-      "version": "0.2.32",
+      "version": "0.3.0",
       "bin": {
         "magnus": "dist/cli.js",
       },
@@ -89,13 +90,13 @@
     },
     "packages/magnitude-mcp": {
       "name": "magnitude-mcp",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "bin": {
         "magnitude-mcp": "dist/index.js",
       },
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.18.0",
-        "magnitude-core": "^0.2.32",
+        "magnitude-core": "workspace:*",
         "patchright": "^1.49.0",
         "zod": "^3.24.2",
         "zod-to-json-schema": "^3.24.5",
@@ -108,7 +109,7 @@
     },
     "packages/magnitude-test": {
       "name": "magnitude-test",
-      "version": "0.3.11",
+      "version": "0.3.12",
       "bin": {
         "magnitude": "dist/cli.js",
       },

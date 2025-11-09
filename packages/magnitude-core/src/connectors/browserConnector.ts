@@ -180,6 +180,29 @@ export class BrowserConnector implements AgentConnector {
     }
 
     async getInstructions(): Promise<void | string> {
-        return;
+        return `
+You have access to advanced browser inspection capabilities beyond just screenshots:
+
+## Page Content Inspection
+- You can retrieve the full HTML content of any page to inspect DOM structure, find specific elements, and understand the page layout
+- You can access the accessibility tree which provides a structured view of interactive elements with their roles, names, and states
+- Use these when you need to locate specific elements reliably (e.g., forms, buttons, inputs) or verify page structure
+
+## Console Monitoring
+- Browser console messages (logs, errors, warnings) are automatically captured
+- Use this to debug JavaScript errors, check for console warnings, or verify that expected logs appear
+- Particularly useful for debugging why interactions might be failing or for test assertions
+
+## Network Monitoring
+- All network requests are automatically tracked including URLs, methods, status codes, and headers
+- Use this to verify API calls are being made correctly, check response statuses, or debug loading issues
+- Helpful for ensuring data is being fetched/submitted properly during test flows
+
+## Best Practices
+- When form filling fails or elements are hard to locate visually, inspect the HTML/accessibility tree first
+- If interactions seem to fail silently, check console logs for JavaScript errors
+- For data submission flows, verify network requests to confirm data is being sent correctly
+- These inspection tools are faster and more reliable than trying to visually locate elements in screenshots
+        `.trim();
     }
 }
