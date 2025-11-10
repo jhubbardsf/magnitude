@@ -19,7 +19,10 @@ program
     .requiredOption('-u, --url <url>', 'Base URL of the application to test')
     .option('-o, --output <dir>', 'Output directory for generated tests', './generated-tests')
     .option('-s, --scenarios <file>', 'Path to JSON file with test scenarios')
-    .option('-a, --autonomous', 'Autonomous exploration mode (no scenarios needed)')
+    .option('-a, --autonomous', 'Autonomous exploration mode (no scenarios needed)', true)
+    .option('--provider <provider>', 'LLM provider (anthropic, openai, bedrock, google-ai)', 'anthropic')
+    .option('--model <model>', 'Model name (e.g., claude-sonnet-4.5, gpt-4o)', 'claude-sonnet-4.5')
+    .option('--api-key <key>', 'API key for LLM provider (or use ANTHROPIC_API_KEY env var)')
     .action(async (opts) => {
         try {
             let scenarios: TestScenario[] | undefined;
@@ -37,24 +40,32 @@ program
                 console.log(`📋 Loaded ${scenarios!.length} scenario(s) from ${opts.scenarios}`);
             }
 
-            // Validate mode
-            if (!scenarios && !opts.autonomous) {
-                console.error(`❌ Must provide either --scenarios or --autonomous flag`);
-                console.log(`\nExamples:`);
-                console.log(`  # Autonomous exploration`);
-                console.log(`  magnitude-generate-tests generate --url https://example.com --autonomous`);
-                console.log();
-                console.log(`  # With scenarios`);
-                console.log(`  magnitude-generate-tests generate --url https://example.com --scenarios scenarios.json`);
+            // Configure LLM
+            const apiKey = opts.apiKey ||
+                          process.env.ANTHROPIC_API_KEY ||
+                          process.env.OPENAI_API_KEY ||
+                          process.env.GOOGLE_API_KEY;
+
+            if (!apiKey) {
+                console.error(`❌ API key required. Provide via --api-key or set ANTHROPIC_API_KEY env var`);
                 process.exit(1);
             }
+
+            const llmClient: any = {
+                provider: opts.provider,
+                options: {
+                    model: opts.model,
+                    apiKey: apiKey
+                }
+            };
 
             // Generate tests
             const outputPath = await generatePlaywrightTests({
                 url: opts.url,
                 scenarios,
                 autonomous: opts.autonomous,
-                outputDir: opts.output
+                outputDir: opts.output,
+                llm: llmClient
             });
 
             console.log(`\n✅ Success! Test suite generated at: ${outputPath}`);

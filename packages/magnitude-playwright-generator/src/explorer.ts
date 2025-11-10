@@ -20,15 +20,22 @@ export class ApplicationExplorer {
 
     async start() {
         // Initialize Magnitude agent with selectors enabled
-        this.agent = await startBrowserAgent({
+        const agentConfig: any = {
             url: this.baseURL,
             connector: new BrowserConnector({
-                enableSelectors: true,  // Enable playwright selectors for reliable recording
+                enableSelectors: true,  // Enable playwright selectors for reliable interaction
                 enableConsoleMonitoring: true,
                 enableNetworkMonitoring: true
             }),
             narrate: true  // Show what it's doing
-        });
+        };
+
+        // Add LLM configuration if provided
+        if (this.options.llm) {
+            agentConfig.llm = this.options.llm;
+        }
+
+        this.agent = await startBrowserAgent(agentConfig);
 
         console.log(`🔍 Started exploration of: ${this.baseURL}`);
     }

@@ -30,6 +30,35 @@ export class ScaffoldGenerator {
             console.log(`✓ Generated test: ${generated.filename}`);
         }
 
+        // Generate scaffold files
+        await this.generateScaffoldFiles(baseURL, outputDir);
+    }
+
+    async generateFullSuite(generatedTests: GeneratedTest[], baseURL: string, outputDir: string): Promise<void> {
+        // Ensure output directory exists
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        // Create tests directory
+        const testsDir = path.join(outputDir, 'tests');
+        if (!fs.existsSync(testsDir)) {
+            fs.mkdirSync(testsDir, { recursive: true });
+        }
+
+        // Write test files
+        for (const test of generatedTests) {
+            const testPath = path.join(testsDir, test.filename);
+            fs.writeFileSync(testPath, test.code);
+            console.log(`✓ Generated test: ${test.filename}`);
+        }
+
+        // Generate scaffold files
+        await this.generateScaffoldFiles(baseURL, outputDir);
+    }
+
+    private async generateScaffoldFiles(baseURL: string, outputDir: string): Promise<void> {
+
         // Generate playwright.config.ts
         const config = this.generatePlaywrightConfig(baseURL);
         const configPath = path.join(outputDir, 'playwright.config.ts');

@@ -1,6 +1,8 @@
 import { ApplicationExplorer } from './explorer';
 import { ScaffoldGenerator } from './scaffoldGenerator';
+import { TestCodeGenerator } from './testCodeGenerator';
 import { GeneratorOptions, TestScenario } from './types';
+import { LLMClient } from 'magnitude-core';
 import * as path from 'path';
 
 export * from './types';
@@ -12,7 +14,10 @@ export { ScaffoldGenerator } from './scaffoldGenerator';
 /**
  * Main function to generate a Playwright test suite from a web application
  *
- * @param options - Configuration options
+ * This tool uses Magnitude's BrowserAgent (with an LLM) to explore the app,
+ * then uses the same LLM to generate idiomatic Playwright test code.
+ *
+ * @param options - Configuration options including LLM provider
  * @returns Path to generated test suite
  */
 export async function generatePlaywrightTests(options: GeneratorOptions): Promise<string> {
@@ -23,7 +28,7 @@ export async function generatePlaywrightTests(options: GeneratorOptions): Promis
     console.log(`   Mode: ${options.scenarios ? 'Prompt-based' : 'Autonomous'}`);
     console.log(`   Output: ${outputDir}\n`);
 
-    // Initialize explorer
+    // Initialize explorer with LLM configuration
     const explorer = new ApplicationExplorer(options);
 
     try {
@@ -33,18 +38,25 @@ export async function generatePlaywrightTests(options: GeneratorOptions): Promis
         // Explore application
         await explorer.explore();
 
-        // Get recorded tests
-        const recordedTests = explorer.getRecordedTests();
+        // Get exploration results (page structures, flows discovered)
+        const explorationResults = explorer.getExplorationResults();
 
-        if (recordedTests.length === 0) {
-            throw new Error('No tests were recorded during exploration');
+        if (explorationResults.length === 0) {
+            throw new Error('No flows were explored');
         }
 
-        console.log(`\n📊 Recorded ${recordedTests.length} test(s)`);
+        console.log(`\n📊 Explored ${explorationResults.length} flow(s)`);
+
+        // Use LLM to generate Playwright tests from exploration data
+        console.log(`\n🤖 Generating Playwright test code...`);
+        const testGenerator = new TestCodeGenerator(options.llm);
+        const generatedTests = await testGenerator.generateTests(explorationResults);
+
+        console.log(`✓ Generated ${generatedTests.length} test file(s)`);
 
         // Generate test suite scaffold
         const scaffoldGen = new ScaffoldGenerator();
-        await scaffoldGen.generateSuite(recordedTests, options.url, outputDir);
+        await scaffoldGen.generateFullSuite(generatedTests, options.url, outputDir);
 
         return outputDir;
     } finally {

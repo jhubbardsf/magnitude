@@ -1,9 +1,11 @@
+import { LLMClient } from 'magnitude-core';
+
 export interface GeneratorOptions {
     url: string;
     outputDir?: string;
     scenarios?: TestScenario[];
     autonomous?: boolean;
-    apiKey?: string;
+    llm?: LLMClient;  // LLM configuration for Magnitude agent
 }
 
 export interface TestScenario {

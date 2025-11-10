@@ -1,6 +1,7 @@
 import { BrowserContext, Page } from "playwright";
 import { Agent, AgentOptions } from ".";
 import { BrowserConnector, BrowserConnectorOptions } from "@/connectors/browserConnector";
+import { WebHarness } from "@/web/harness";
 import { buildDefaultBrowserAgentOptions } from "@/ai/util";
 import { LLMClient } from "@/ai/types";
 import { Schema, ZodSchema } from "zod";
@@ -127,6 +128,10 @@ export class BrowserAgent extends Agent {
     async nav(url: string): Promise<void> {
         this.browserAgentEvents.emit('nav', url);
         await this.require(BrowserConnector).getHarness().navigate(url);
+    }
+
+    getHarness(): WebHarness {
+        return this.require(BrowserConnector).getHarness();
     }
 
     async extract<T extends Schema>(instructions: string, schema: T): Promise<z.infer<T>> {
