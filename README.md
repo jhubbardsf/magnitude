@@ -17,6 +17,7 @@ Magnitude uses vision AI to enable you to control your browser with natural lang
 - 🖱️ **Interact** - Executes precise actions using mouse and keyboard
 - 🔍 **Extract** - Intelligently extracts useful structured data
 - ✅ **Verify** - Built-in test runner with powerful visual assertions
+- 🔬 **Inspect** - Access HTML, console logs, network requests, and accessibility tree
 
 You can use it to automate tasks on the web, integrate between apps without APIs, extract data, test your web apps, or as a building block for your own browser agents.
 

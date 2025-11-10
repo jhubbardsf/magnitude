@@ -103,6 +103,65 @@ The MCP can optionally be configured with a different persistent profile directo
 - `MAGNITUDE_MCP_VIEWPORT_WIDTH`: Override viewport width (default: 950)
 - `MAGNITUDE_MCP_VIEWPORT_HEIGHT`: Override viewport height (default: 720)
 
+## Advanced Configuration
+
+### Browser Inspection Features
+
+Magnitude MCP provides advanced inspection capabilities beyond screenshots:
+
+**Available Tools:**
+- `get_page_html` - Get full HTML content of the page
+- `get_accessibility_tree` - Get accessibility tree with interactive elements
+- `get_console_logs` - Get captured browser console messages
+- `get_network_requests` - Get captured network requests with headers and status codes
+- `set_clipboard`, `copy`, `paste` - Clipboard operations for reliable form filling
+
+**Feature Toggles:**
+
+You can disable console or network monitoring to reduce token usage:
+
+```json
+{
+  "mcpServers": {
+    "magnitude": {
+      "command": "npx",
+      "args": ["magnitude-mcp"],
+      "env": {
+        "MAGNITUDE_MCP_ENABLE_CONSOLE": "false",
+        "MAGNITUDE_MCP_ENABLE_NETWORK": "false"
+      }
+    }
+  }
+}
+```
+
+- `MAGNITUDE_MCP_ENABLE_CONSOLE`: Enable console log capture (default: `true`)
+- `MAGNITUDE_MCP_ENABLE_NETWORK`: Enable network request capture (default: `true`)
+
+### Console & Network Limits
+
+To manage memory usage, Magnitude keeps only recent logs and requests:
+
+```json
+{
+  "mcpServers": {
+    "magnitude": {
+      "command": "npx",
+      "args": ["magnitude-mcp"],
+      "env": {
+        "MAGNITUDE_MCP_CONSOLE_LOG_LIMIT": "1000",
+        "MAGNITUDE_MCP_NETWORK_REQUEST_LIMIT": "200"
+      }
+    }
+  }
+}
+```
+
+- `MAGNITUDE_MCP_CONSOLE_LOG_LIMIT`: Maximum console logs to retain (default: 500, minimum: 10)
+- `MAGNITUDE_MCP_NETWORK_REQUEST_LIMIT`: Maximum network requests to retain (default: 100, minimum: 10)
+
+**Note:** Setting very high limits may impact memory usage on long-running sessions.
+
 ## Examples
 
 Why connect your agent to a browser?

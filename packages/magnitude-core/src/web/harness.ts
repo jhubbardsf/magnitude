@@ -17,6 +17,10 @@ export interface WebHarnessOptions {
     virtualScreenDimensions?: { width: number, height: number }
     visuals?: ActionVisualizerOptions
     switchTabsOnActivity?: boolean  // Whether to automatically switch tabs when user activity is detected vs only if switchTab is used
+    enableConsoleMonitoring?: boolean  // Whether to capture console logs (default: true)
+    enableNetworkMonitoring?: boolean  // Whether to capture network requests (default: true)
+    consoleLogLimit?: number  // Maximum console logs to retain (default: 500, minimum: 10)
+    networkRequestLimit?: number  // Maximum network requests to retain (default: 100, minimum: 10)
 }
 
 type ConsoleMessageType = 'log' | 'debug' | 'info' | 'error' | 'warning' | 'dir' | 'dirxml' | 'table' | 'trace' | 'clear' | 'startGroup' | 'startGroupCollapsed' | 'endGroup' | 'assert' | 'profile' | 'profileEnd' | 'count' | 'timeEnd';
@@ -55,6 +59,8 @@ export class WebHarness { // implements StateComponent
     private tabs: TabManager;
     private consoleLogs: ConsoleMessage[] = [];
     private networkRequests: NetworkRequest[] = [];
+    private consoleLogLimit: number;
+    private networkRequestLimit: number;
 
     public readonly events: EventEmitter<WebHarnessEvents> = new EventEmitter();
 
@@ -62,6 +68,11 @@ export class WebHarness { // implements StateComponent
         //this.page = page;
         this.context = context;
         this.options = options;
+
+        // Validate and set limits (minimum 10, defaults: 500 for console, 100 for network)
+        this.consoleLogLimit = Math.max(10, options.consoleLogLimit ?? 500);
+        this.networkRequestLimit = Math.max(10, options.networkRequestLimit ?? 100);
+
         this.stability = new PageStabilityAnalyzer({ disableVisualStability: true });
         this.visualizer = new ActionVisualizer(this.context, this.options.visuals ?? {});
         this.transformer = new DOMTransformer();
@@ -93,35 +104,50 @@ export class WebHarness { // implements StateComponent
     }
 
     private setupPageListeners(page: Page) {
-        // Console listener
-        page.on('console', (msg) => {
-            this.consoleLogs.push({
-                type: msg.type() as ConsoleMessage['type'],
-                text: msg.text(),
-                timestamp: Date.now()
+        const enableConsole = this.options.enableConsoleMonitoring ?? true;
+        const enableNetwork = this.options.enableNetworkMonitoring ?? true;
+
+        // Console listener with circular buffer
+        if (enableConsole) {
+            page.on('console', (msg) => {
+                // Implement circular buffer: remove oldest if at limit
+                if (this.consoleLogs.length >= this.consoleLogLimit) {
+                    this.consoleLogs.shift();
+                }
+                this.consoleLogs.push({
+                    type: msg.type() as ConsoleMessage['type'],
+                    text: msg.text(),
+                    timestamp: Date.now()
+                });
             });
-        });
+        }
 
-        // Network listeners
-        page.on('request', (request) => {
-            const networkRequest: NetworkRequest = {
-                url: request.url(),
-                method: request.method(),
-                resourceType: request.resourceType(),
-                timestamp: Date.now(),
-                requestHeaders: request.headers()
-            };
-            this.networkRequests.push(networkRequest);
-        });
+        // Network listeners with circular buffer
+        if (enableNetwork) {
+            page.on('request', (request) => {
+                // Implement circular buffer: remove oldest if at limit
+                if (this.networkRequests.length >= this.networkRequestLimit) {
+                    this.networkRequests.shift();
+                }
+                const networkRequest: NetworkRequest = {
+                    url: request.url(),
+                    method: request.method(),
+                    resourceType: request.resourceType(),
+                    timestamp: Date.now(),
+                    requestHeaders: request.headers()
+                };
+                this.networkRequests.push(networkRequest);
+            });
 
-        page.on('response', async (response) => {
-            const request = this.networkRequests.find(r => r.url === response.url() && !r.status);
-            if (request) {
-                request.status = response.status();
-                request.statusText = response.statusText();
-                request.responseHeaders = response.headers();
-            }
-        });
+            page.on('response', async (response) => {
+                const request = this.networkRequests.find(r => r.url === response.url() && !r.status);
+                if (request) {
+                    request.status = response.status();
+                    request.statusText = response.statusText();
+                    request.responseHeaders = response.headers();
+                }
+            });
+        }
     }
 
     async retrieveTabState(): Promise<TabState> {
@@ -456,6 +482,44 @@ export class WebHarness { // implements StateComponent
         }, text);
     }
 
+    // Playwright selector-based methods (Mode 2: fast but potentially detectable)
+    async clickText(text: string, options?: { exact?: boolean }) {
+        const element = this.page.getByText(text, { exact: options?.exact });
+        await element.click();
+        await this.waitForStability();
+    }
+
+    async clickRole(role: 'button' | 'link' | 'textbox' | 'checkbox' | 'radio', name?: string) {
+        const element = name ? this.page.getByRole(role, { name }) : this.page.getByRole(role);
+        await element.click();
+        await this.waitForStability();
+    }
+
+    async clickSelector(selector: string) {
+        await this.page.locator(selector).click();
+        await this.waitForStability();
+    }
+
+    async clickTestId(testId: string) {
+        await this.page.getByTestId(testId).click();
+        await this.waitForStability();
+    }
+
+    async fillByLabel(label: string, value: string) {
+        await this.page.getByLabel(label).fill(value);
+        await this.waitForStability();
+    }
+
+    async fillByPlaceholder(placeholder: string, value: string) {
+        await this.page.getByPlaceholder(placeholder).fill(value);
+        await this.waitForStability();
+    }
+
+    async fillSelector(selector: string, value: string) {
+        await this.page.locator(selector).fill(value);
+        await this.waitForStability();
+    }
+
     async goBack() {
         await this.page.goBack();
     }
@@ -512,6 +576,14 @@ export class WebHarness { // implements StateComponent
 
     clearNetworkRequests(): void {
         this.networkRequests = [];
+    }
+
+    isConsoleMonitoringEnabled(): boolean {
+        return this.options.enableConsoleMonitoring ?? true;
+    }
+
+    isNetworkMonitoringEnabled(): boolean {
+        return this.options.enableNetworkMonitoring ?? true;
     }
 
     // async applyTransformations() {

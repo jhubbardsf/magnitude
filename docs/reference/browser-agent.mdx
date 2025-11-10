@@ -173,6 +173,59 @@ await agent.stop();
   </Note>
 </ParamField>
 
+### `getHarness()`
+
+Access the underlying `WebHarness` instance for advanced browser inspection capabilities.
+
+<RequestExample>
+```typescript Advanced Inspection
+const agent = await startBrowserAgent();
+const harness = agent.getHarness();
+
+// Get full HTML content
+const html = await harness.getPageHTML();
+console.log(html.includes('<form id="login">'));
+
+// Get accessibility tree
+const a11yTree = await harness.getAccessibilityTree();
+
+// Get console logs
+const logs = harness.getConsoleLogs();
+const errors = logs.filter(l => l.type === 'error');
+
+// Get network requests
+const requests = harness.getNetworkRequests();
+const apiCalls = requests.filter(r => r.url.includes('/api/'));
+
+// Clear buffers after reading
+harness.clearConsoleLogs();
+harness.clearNetworkRequests();
+```
+</RequestExample>
+
+**Available WebHarness Methods:**
+
+- `getPageHTML()` - Returns full HTML content of the current page
+- `getAccessibilityTree()` - Returns the accessibility tree with interactive elements
+- `getConsoleLogs(clear?: boolean)` - Returns captured console messages (optionally clears buffer)
+- `getNetworkRequests(clear?: boolean)` - Returns captured network requests (optionally clears buffer)
+- `clearConsoleLogs()` - Clears the console log buffer
+- `clearNetworkRequests()` - Clears the network request buffer
+- `isConsoleMonitoringEnabled()` - Check if console monitoring is enabled
+- `isNetworkMonitoringEnabled()` - Check if network monitoring is enabled
+
+<Note>
+Configure buffer limits via `BrowserConnectorOptions`:
+```typescript
+const agent = await startBrowserAgent({
+  connector: new BrowserConnector({
+    consoleLogLimit: 1000,      // default: 500, minimum: 10
+    networkRequestLimit: 200    // default: 100, minimum: 10
+  })
+});
+```
+</Note>
+
 ### `stop()`
 
 Closes the browser and cleans up any resources used by the agent.
