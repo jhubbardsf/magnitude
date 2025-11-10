@@ -10,6 +10,8 @@ export { ApplicationExplorer } from './explorer';
 export { TestRecorder } from './recorder';
 export { PlaywrightCodeGenerator } from './codeGenerator';
 export { ScaffoldGenerator } from './scaffoldGenerator';
+export { EmailService } from './emailService';
+export type { EmailServiceConfig } from './emailService';
 
 /**
  * Main function to generate a Playwright test suite from a web application

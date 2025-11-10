@@ -7,6 +7,8 @@ import logger from "@/logger";
 import { TabManager, TabState } from "./tabs";
 import { DOMTransformer } from "./transformer";
 import { Image } from '@/memory/image';
+import { ToastDetector } from "./toastDetector";
+import type { DetectedToast } from "./toastDetector";
 import EventEmitter from "eventemitter3";
 //import { StateComponent } from "@/facets";
 
@@ -21,7 +23,11 @@ export interface WebHarnessOptions {
     enableNetworkMonitoring?: boolean  // Whether to capture network requests (default: true)
     consoleLogLimit?: number  // Maximum console logs to retain (default: 500, minimum: 10)
     networkRequestLimit?: number  // Maximum network requests to retain (default: 100, minimum: 10)
+    toastDetectionMode?: 'auto' | 'always' | 'never'  // Toast detection mode (default: 'auto')
+    toastDetectionDelay?: number  // Delay in ms to wait for toasts (default: 500, only used if mode='always' or toast capability detected)
 }
+
+export { DetectedToast };
 
 type ConsoleMessageType = 'log' | 'debug' | 'info' | 'error' | 'warning' | 'dir' | 'dirxml' | 'table' | 'trace' | 'clear' | 'startGroup' | 'startGroupCollapsed' | 'endGroup' | 'assert' | 'profile' | 'profileEnd' | 'count' | 'timeEnd';
 
@@ -61,6 +67,12 @@ export class WebHarness { // implements StateComponent
     private networkRequests: NetworkRequest[] = [];
     private consoleLogLimit: number;
     private networkRequestLimit: number;
+    private toastDetector: ToastDetector | null = null;
+    private cachedToasts: DetectedToast[] = [];  // Cache toasts after actions
+    private toastDetectionMode: 'auto' | 'always' | 'never';
+    private toastDetectionDelay: number;
+    private toastCapabilityChecked: boolean = false;
+    private hasToastCapability: boolean = false;
 
     public readonly events: EventEmitter<WebHarnessEvents> = new EventEmitter();
 
@@ -72,6 +84,10 @@ export class WebHarness { // implements StateComponent
         // Validate and set limits (minimum 10, defaults: 500 for console, 100 for network)
         this.consoleLogLimit = Math.max(10, options.consoleLogLimit ?? 500);
         this.networkRequestLimit = Math.max(10, options.networkRequestLimit ?? 100);
+
+        // Configure toast detection
+        this.toastDetectionMode = options.toastDetectionMode ?? 'auto';
+        this.toastDetectionDelay = options.toastDetectionDelay ?? 500;
 
         this.stability = new PageStabilityAnalyzer({ disableVisualStability: true });
         this.visualizer = new ActionVisualizer(this.context, this.options.visuals ?? {});
@@ -100,6 +116,15 @@ export class WebHarness { // implements StateComponent
         await this.visualizer.setActivePage(page);
         this.transformer.setActivePage(page);
         this.setupPageListeners(page);
+
+        // Initialize toast detector for this page
+        if (this.toastDetectionMode !== 'never') {
+            this.toastDetector = new ToastDetector(page);
+            // Reset capability check for new page
+            this.toastCapabilityChecked = false;
+            this.hasToastCapability = false;
+        }
+
         this.events.emit('activePageChanged', page);
     }
 
@@ -542,6 +567,44 @@ export class WebHarness { // implements StateComponent
 
     async waitForStability(timeout?: number): Promise<void> {
         await this.stability.waitForStability(timeout);
+
+        // Smart toast detection
+        if (this.toastDetectionMode === 'never') {
+            return;  // Skip entirely
+        }
+
+        if (!this.toastDetector) {
+            return;  // No detector available
+        }
+
+        // Auto mode: Check capability first (only once per page)
+        if (this.toastDetectionMode === 'auto') {
+            if (!this.toastCapabilityChecked) {
+                this.hasToastCapability = await this.toastDetector.detectToastCapability();
+                this.toastCapabilityChecked = true;
+
+                if (this.hasToastCapability) {
+                    logger.trace('Toast capability detected on this page');
+                } else {
+                    logger.trace('No toast capability detected, skipping delays');
+                }
+            }
+
+            if (!this.hasToastCapability) {
+                return;  // No toasts on this page, skip delay
+            }
+        }
+
+        // Mode is 'always' OR auto detected toast capability
+        // Wait for toasts to render (they often animate in)
+        await this.page.waitForTimeout(this.toastDetectionDelay);
+
+        const toasts = await this.toastDetector.detectToasts();
+        if (toasts.length > 0) {
+            // Cache toasts so they're available for observations later
+            this.cachedToasts = toasts;
+            logger.trace(`Detected ${toasts.length} toast(s): ${toasts.map(t => t.text).join(', ')}`);
+        }
     }
 
     // Inspection methods
@@ -578,12 +641,27 @@ export class WebHarness { // implements StateComponent
         this.networkRequests = [];
     }
 
+    async getToasts(): Promise<DetectedToast[]> {
+        // Return cached toasts from last action/stability check
+        const toasts = [...this.cachedToasts];
+        this.cachedToasts = [];  // Clear after reading
+        return toasts;
+    }
+
     isConsoleMonitoringEnabled(): boolean {
         return this.options.enableConsoleMonitoring ?? true;
     }
 
     isNetworkMonitoringEnabled(): boolean {
         return this.options.enableNetworkMonitoring ?? true;
+    }
+
+    isToastDetectionEnabled(): boolean {
+        return this.toastDetectionMode !== 'never';
+    }
+
+    getToastDetectionMode(): 'auto' | 'always' | 'never' {
+        return this.toastDetectionMode;
     }
 
     // async applyTransformations() {

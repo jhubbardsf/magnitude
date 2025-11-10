@@ -7,6 +7,8 @@ interface ExplorationResult {
     pageStructure: string;
     interactions: string[];
     url: string;
+    emailUsed?: string;
+    verificationCode?: string;
 }
 
 export class TestCodeGenerator {
@@ -69,10 +71,31 @@ export class TestCodeGenerator {
         testSteps.push(`    // Exploration performed: ${exploration.interactions.join(', ')}`);
         testSteps.push('');
 
+        // If email was used, add email generation
+        if (exploration.emailUsed) {
+            testSteps.push(`    // Generate test email for signup/verification`);
+            testSteps.push(`    const testEmail = '${exploration.emailUsed}';`);
+            testSteps.push('');
+        }
+
         // If forms detected, add form interaction example
         if (pageStructure.forms > 0) {
             testSteps.push(`    // TODO: Fill form fields (${pageStructure.inputs} inputs detected)`);
-            testSteps.push(`    // Example: await page.getByLabel('Email').fill('test@example.com');`);
+            if (exploration.emailUsed) {
+                testSteps.push(`    // Use testEmail for email fields`);
+                testSteps.push(`    // await page.getByLabel('Email').fill(testEmail);`);
+            } else {
+                testSteps.push(`    // Example: await page.getByLabel('Email').fill('test@example.com');`);
+            }
+            testSteps.push('');
+        }
+
+        // If verification code was found, add email verification steps
+        if (exploration.verificationCode) {
+            testSteps.push(`    // Email verification detected`);
+            testSteps.push(`    // TODO: Integrate email service to fetch verification code`);
+            testSteps.push(`    // During exploration, verification code was: ${exploration.verificationCode}`);
+            testSteps.push(`    // await page.getByLabel('Verification Code').fill(verificationCode);`);
             testSteps.push('');
         }
 

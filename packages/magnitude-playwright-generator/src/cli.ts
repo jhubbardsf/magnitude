@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import { generatePlaywrightTests } from './index';
 import { TestScenario } from './types';
+import { LogConfigManager } from './logging/config';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -20,9 +21,17 @@ program
     .option('-o, --output <dir>', 'Output directory for generated tests', './generated-tests')
     .option('-s, --scenarios <file>', 'Path to JSON file with test scenarios')
     .option('-a, --autonomous', 'Autonomous exploration mode (no scenarios needed)', true)
-    .option('--provider <provider>', 'LLM provider (anthropic, openai, bedrock, google-ai)', 'anthropic')
-    .option('--model <model>', 'Model name (e.g., claude-sonnet-4.5, gpt-4o)', 'claude-sonnet-4.5')
-    .option('--api-key <key>', 'API key for LLM provider (or use ANTHROPIC_API_KEY env var)')
+    .option('--provider <provider>', 'LLM provider (claude-code, anthropic, openai, aws-bedrock, google-ai, vertex-ai, azure-openai, openai-generic)', 'claude-code')
+    .option('--model <model>', 'Model name (e.g., claude-sonnet-4-5-20250929, claude-3-5-sonnet-20241022)', 'claude-sonnet-4-5-20250929')
+    .option('--api-key <key>', 'API key for LLM provider (not needed for claude-code)')
+    .option('--email-api-key <key>', 'Mailinator API key (or use MAILINATOR_API_KEY env var)')
+    .option('--email-domain <domain>', 'Mailinator domain (or use MAILINATOR_DOMAIN env var)')
+    .option('--log-dir <dir>', 'Directory for debug logs (or use MAGNITUDE_LOG_DIR env var)')
+    .option('--log-baml', 'Save BAML prompts and responses (or use MAGNITUDE_LOG_BAML=true)')
+    .option('--log-actions', 'Save actions and reasoning (or use MAGNITUDE_LOG_ACTIONS=true)')
+    .option('--log-screenshots', 'Save all screenshots (or use MAGNITUDE_LOG_SCREENSHOTS=true)')
+    .option('--log-network', 'Save network requests (or use MAGNITUDE_LOG_NETWORK=true)')
+    .option('--toast-detection <mode>', 'Toast detection mode: auto (default), always, never', 'auto')
     .action(async (opts) => {
         try {
             let scenarios: TestScenario[] | undefined;
@@ -41,23 +50,67 @@ program
             }
 
             // Configure LLM
-            const apiKey = opts.apiKey ||
-                          process.env.ANTHROPIC_API_KEY ||
-                          process.env.OPENAI_API_KEY ||
-                          process.env.GOOGLE_API_KEY;
-
-            if (!apiKey) {
-                console.error(`❌ API key required. Provide via --api-key or set ANTHROPIC_API_KEY env var`);
-                process.exit(1);
-            }
-
             const llmClient: any = {
                 provider: opts.provider,
                 options: {
-                    model: opts.model,
-                    apiKey: apiKey
+                    model: opts.model
                 }
             };
+
+            // API key not needed for claude-code provider
+            if (opts.provider !== 'claude-code') {
+                const apiKey = opts.apiKey ||
+                              process.env.ANTHROPIC_API_KEY ||
+                              process.env.OPENAI_API_KEY ||
+                              process.env.GOOGLE_API_KEY;
+
+                if (!apiKey) {
+                    console.error(`❌ API key required for provider: ${opts.provider}`);
+                    console.log(`\nProvide via --api-key flag or environment variable:`);
+                    console.log(`  ANTHROPIC_API_KEY (for anthropic)`);
+                    console.log(`  OPENAI_API_KEY (for openai)`);
+                    console.log(`  GOOGLE_API_KEY (for google-ai)`);
+                    console.log(`\nOr use --provider claude-code (no API key needed!)`);
+                    process.exit(1);
+                }
+
+                llmClient.options.apiKey = apiKey;
+            }
+
+            // Configure email service if credentials provided
+            let emailConfig;
+            const emailApiKey = opts.emailApiKey || process.env.MAILINATOR_API_KEY;
+            const emailDomain = opts.emailDomain || process.env.MAILINATOR_DOMAIN;
+
+            if (emailApiKey && emailDomain) {
+                emailConfig = {
+                    provider: 'mailinator' as const,
+                    apiKey: emailApiKey,
+                    domain: emailDomain
+                };
+                console.log(`✓ Email verification enabled (Mailinator)`);
+            } else if (emailApiKey || emailDomain) {
+                console.warn(`⚠ Email configuration incomplete. Need both MAILINATOR_API_KEY and MAILINATOR_DOMAIN.`);
+            }
+
+            // Configure logging
+            const logConfig = new LogConfigManager();
+            if (opts.logDir) process.env.MAGNITUDE_LOG_DIR = opts.logDir;
+            logConfig.updateFromCLIFlags({
+                logBaml: opts.logBaml,
+                logActions: opts.logActions,
+                logScreenshots: opts.logScreenshots,
+                logNetwork: opts.logNetwork,
+                logDir: opts.logDir
+            });
+
+            // Validate toast detection mode
+            const toastMode = opts.toastDetection as 'auto' | 'always' | 'never';
+            if (!['auto', 'always', 'never'].includes(toastMode)) {
+                console.error(`❌ Invalid toast detection mode: ${opts.toastDetection}`);
+                console.log(`   Valid options: auto, always, never`);
+                process.exit(1);
+            }
 
             // Generate tests
             const outputPath = await generatePlaywrightTests({
@@ -65,7 +118,18 @@ program
                 scenarios,
                 autonomous: opts.autonomous,
                 outputDir: opts.output,
-                llm: llmClient
+                llm: llmClient,
+                email: emailConfig,
+                toastDetectionMode: toastMode,
+                logging: logConfig.getConfig().enabled ? {
+                    enabled: true,
+                    sessionDir: logConfig.getSessionDir(),
+                    logDir: logConfig.getConfig().logDir,
+                    baml: logConfig.getConfig().baml,
+                    actions: logConfig.getConfig().actions,
+                    screenshots: logConfig.getConfig().screenshots,
+                    network: logConfig.getConfig().network
+                } : undefined
             });
 
             console.log(`\n✅ Success! Test suite generated at: ${outputPath}`);

@@ -1,11 +1,30 @@
 import { LLMClient } from 'magnitude-core';
 
+export interface EmailConfig {
+    provider: 'mailinator';
+    apiKey: string;
+    domain: string;  // e.g., @team337632.testinator.com or team337632.testinator.com
+}
+
+export interface LoggingOptions {
+    enabled: boolean;
+    sessionDir: string;
+    logDir: string;
+    baml: boolean;
+    actions: boolean;
+    screenshots: boolean;
+    network: boolean;
+}
+
 export interface GeneratorOptions {
     url: string;
     outputDir?: string;
     scenarios?: TestScenario[];
     autonomous?: boolean;
     llm?: LLMClient;  // LLM configuration for Magnitude agent
+    email?: EmailConfig;  // Optional email service for verification codes
+    logging?: LoggingOptions;  // Optional logging configuration
+    toastDetectionMode?: 'auto' | 'always' | 'never';  // Toast detection mode (default: 'auto')
 }
 
 export interface TestScenario {

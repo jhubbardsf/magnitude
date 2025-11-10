@@ -22,11 +22,17 @@ npm install -g magnitude-playwright-generator
 ### Autonomous Mode (Discovers flows automatically)
 
 ```bash
+# Using Claude Code subscription (no API key needed!)
+magnitude-generate-tests generate \
+  --url https://your-app.com \
+  --autonomous
+
+# Or with explicit provider
 magnitude-generate-tests generate \
   --url https://your-app.com \
   --autonomous \
-  --provider anthropic \
-  --api-key your-api-key
+  --provider claude-code \
+  --model claude-sonnet-4.5
 ```
 
 ### Scenario-Based Mode (Guided exploration)
@@ -63,24 +69,57 @@ magnitude-generate-tests generate \
 
 ## LLM Providers
 
-Supports multiple LLM providers:
+Supports multiple LLM providers. **Recommended:** Use `claude-code` to leverage your existing Claude Code subscription!
+
+### Claude Code (Recommended - Uses Your Subscription!)
 
 ```bash
-# Anthropic Claude (default)
+# Sonnet 4.5 (default, recommended)
+--provider claude-code --model claude-sonnet-4-5-20250929
+# No API key needed! Uses your Claude Code Pro/Max subscription
+
+# Sonnet 3.5 (stable, well-tested)
+--provider claude-code --model claude-3-5-sonnet-20241022
+
+# Or just use defaults (uses Sonnet 4.5)
+--provider claude-code
+```
+
+**Note:** Model identifiers use full names with dates:
+- Claude Code: `claude-sonnet-4-5-20250929`, `claude-3-5-sonnet-20241022`
+- Anthropic API: Same format
+- Bedrock: `anthropic.claude-sonnet-4-5-20250929` (with prefix)
+
+### Other Supported Providers
+
+```bash
+# Anthropic API (requires API key)
 --provider anthropic --model claude-sonnet-4.5
 export ANTHROPIC_API_KEY=your-key
+
+# AWS Bedrock
+--provider aws-bedrock --model anthropic.claude-sonnet-4-5-20250929
+# Uses AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION env vars
 
 # OpenAI
 --provider openai --model gpt-4o
 export OPENAI_API_KEY=your-key
 
-# AWS Bedrock
---provider bedrock --model anthropic.claude-sonnet-4-5-20250929
-export AWS_ACCESS_KEY_ID=your-key
-
-# Google AI
+# Google AI Studio
 --provider google-ai --model gemini-2.5-pro
 export GOOGLE_API_KEY=your-key
+
+# Google Vertex AI
+--provider vertex-ai --model gemini-2.5-pro
+# Requires GCP credentials configuration
+
+# Azure OpenAI
+--provider azure-openai --model gpt-4
+# Requires resource name, deployment ID, API version, and API key
+
+# OpenAI-Compatible APIs (Ollama, etc.)
+--provider openai-generic --model your-model
+# Requires baseUrl and optional API key
 ```
 
 ## How It Works
@@ -117,14 +156,88 @@ generated-tests/
 ## Requirements
 
 - Node.js >= 18
-- API key for LLM provider (Anthropic, OpenAI, etc.)
+- Claude Code subscription (recommended) OR API key for LLM provider (Anthropic, OpenAI, etc.)
 - Web application to test (can be localhost)
+- **Optional:** Mailinator account for email verification testing
+
+## Email Verification Support
+
+Many applications require email verification during signup. The test generator can automatically handle this!
+
+### Setup Mailinator
+
+1. **Get a Mailinator account** at [mailinator.com](https://www.mailinator.com)
+2. **Get your API key** from Mailinator dashboard
+3. **Get your team domain** (e.g., `@team123456.testinator.com`)
+
+### Configure Email Verification
+
+**Via Environment Variables (Recommended):**
+
+```bash
+export MAILINATOR_API_KEY=your-api-key-here
+export MAILINATOR_DOMAIN=@team123456.testinator.com
+
+# Now run test generation
+magnitude-generate-tests generate --url https://your-app.com --autonomous
+```
+
+**Via Command Line:**
+
+```bash
+magnitude-generate-tests generate \
+  --url https://your-app.com \
+  --autonomous \
+  --email-api-key your-api-key-here \
+  --email-domain @team123456.testinator.com
+```
+
+### How It Works
+
+When email verification is configured:
+
+1. **Email Generation:** Tool automatically generates unique test emails (e.g., `test-1731181234567-abc@team123456.testinator.com`)
+2. **Form Filling:** Agent uses the test email in signup forms
+3. **Verification Detection:** Detects "verification code" or "OTP" fields in the page
+4. **Email Polling:** Automatically checks Mailinator inbox for verification emails (30-second timeout)
+5. **Code Extraction:** Extracts verification codes using smart patterns:
+   - 6-digit codes: `123456`
+   - Formatted codes: `1234-5678-9012-3456`
+   - Space-separated: `1234 5678`
+
+### Generated Test Output
+
+Tests will include email verification steps:
+
+```typescript
+test('signup flow', async ({ page }) => {
+  // Generate test email for signup/verification
+  const testEmail = 'test-1731181234567-abc@team123456.testinator.com';
+
+  await page.getByLabel('Email').fill(testEmail);
+  await page.getByLabel('Password').fill('SecurePassword123!');
+  await page.getByRole('button', { name: 'Sign Up' }).click();
+
+  // Email verification detected
+  // TODO: Integrate email service to fetch verification code
+  // During exploration, verification code was: 123456
+  // await page.getByLabel('Verification Code').fill(verificationCode);
+});
+```
+
+### Without Email Verification
+
+If you don't configure email verification:
+- Tool works normally but will pause at verification steps
+- Generated tests will have TODOs for manual email handling
+- You'll need to manually add email verification logic later
 
 ## Examples
 
 ### Generate tests for local development server
 
 ```bash
+# Uses Claude Code by default (no API key needed!)
 magnitude-generate-tests generate \
   --url http://localhost:3000 \
   --autonomous
@@ -139,6 +252,17 @@ magnitude-generate-tests example-scenarios  # Creates scenarios.json template
 magnitude-generate-tests generate \
   --url https://your-app.com \
   --scenarios scenarios.json
+```
+
+### Use different LLM provider
+
+```bash
+# With Anthropic API
+magnitude-generate-tests generate \
+  --url https://your-app.com \
+  --autonomous \
+  --provider anthropic \
+  --api-key $ANTHROPIC_API_KEY
 ```
 
 ## Current Limitations (MVP)

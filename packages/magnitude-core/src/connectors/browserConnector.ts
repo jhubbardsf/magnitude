@@ -40,6 +40,8 @@ export interface BrowserConnectorOptions {
     consoleLogLimit?: number  // Maximum console logs to retain (default: 500, minimum: 10)
     networkRequestLimit?: number  // Maximum network requests to retain (default: 100, minimum: 10)
     enableSelectors?: boolean  // Whether to enable Playwright selector-based actions (default: false)
+    toastDetectionMode?: 'auto' | 'always' | 'never'  // Toast detection mode (default: 'auto')
+    toastDetectionDelay?: number  // Delay in ms to wait for toasts (default: 500)
 }
 
 export interface BrowserConnectorStateData {
@@ -81,7 +83,9 @@ export class BrowserConnector implements AgentConnector {
             enableConsoleMonitoring: this.options.enableConsoleMonitoring,
             enableNetworkMonitoring: this.options.enableNetworkMonitoring,
             consoleLogLimit: this.options.consoleLogLimit,
-            networkRequestLimit: this.options.networkRequestLimit
+            networkRequestLimit: this.options.networkRequestLimit,
+            toastDetectionMode: this.options.toastDetectionMode,
+            toastDetectionDelay: this.options.toastDetectionDelay
         });
         await this.harness.start();
         this.logger.info("WebHarness started.");
@@ -185,6 +189,43 @@ export class BrowserConnector implements AgentConnector {
                 { type: 'tabinfo', limit: 1 }
             )
         );
+
+        // Detect and include toast notifications
+        const toasts = await this.harness.getToasts();
+        if (toasts.length > 0) {
+            const toastInfo = toasts.map(t => {
+                const icon = t.type === 'success' ? '🟢' : t.type === 'error' ? '🔴' : t.type === 'warning' ? '🟡' : 'ℹ️';
+                return `${icon} Toast: ${t.text}`;
+            }).join('\n');
+
+            observations.push(
+                Observation.fromConnector(
+                    this.id,
+                    toastInfo,
+                    { type: 'toast', limit: 3 }  // Keep last 3 toasts
+                )
+            );
+        }
+
+        // Check network responses after actions (proactive error detection)
+        const networkRequests = this.harness.getNetworkRequests(false);
+        const recentRequests = networkRequests.slice(-5);  // Last 5 requests
+        const failures = recentRequests.filter(r => r.status && r.status >= 400);
+
+        if (failures.length > 0) {
+            const failureInfo = failures.map(f =>
+                `⚠️ Network: ${f.method} ${f.url} returned ${f.status} ${f.statusText}`
+            ).join('\n');
+
+            observations.push(
+                Observation.fromConnector(
+                    this.id,
+                    failureInfo,
+                    { type: 'network-errors', limit: 2 }
+                )
+            );
+        }
+
         return observations;
     }
 
@@ -228,7 +269,20 @@ Use selector actions PREFERENTIALLY for reliability and speed when elements have
         sections.push(`## Page Content Inspection
 - You can retrieve the full HTML content of any page to inspect DOM structure, find specific elements, and understand the page layout
 - You can access the accessibility tree which provides a structured view of interactive elements with their roles, names, and states
-- Use these when you need to locate specific elements reliably (e.g., forms, buttons, inputs) or verify page structure`);
+- Use these when you need to locate specific elements reliably (e.g., forms, buttons, inputs) or verify page structure
+
+## Toast Notifications & Feedback
+- Toast notifications (success/error messages) are automatically detected and shown with each observation
+- Pay close attention to toasts as they indicate whether your actions succeeded or failed
+- Format: "🟢 Toast: Action successful!" or "🔴 Toast: Error message"
+- If you see an error toast, adjust your approach accordingly
+
+## Network Response Monitoring
+- Failed network requests (4xx/5xx) are automatically highlighted
+- After form submissions or critical actions, check for network errors
+- Format: "⚠️ Network: POST /api/register returned 400 Bad Request"
+- Network failures often explain why visual feedback is missing`);
+
 
         if (enableConsole) {
             sections.push(`## Console Monitoring

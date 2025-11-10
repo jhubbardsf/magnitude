@@ -25,6 +25,8 @@ const config = {
     consoleLogLimit: Math.max(10, parseInt(process.env.MAGNITUDE_MCP_CONSOLE_LOG_LIMIT || '500')),  // Default: 500, minimum: 10
     networkRequestLimit: Math.max(10, parseInt(process.env.MAGNITUDE_MCP_NETWORK_REQUEST_LIMIT || '100')),  // Default: 100, minimum: 10
     enableSelectors: process.env.MAGNITUDE_MCP_ENABLE_SELECTORS === 'true',  // Default: false, enables playwright selector-based actions
+    toastDetectionMode: (process.env.MAGNITUDE_MCP_TOAST_DETECTION as 'auto' | 'always' | 'never') || 'auto',  // Default: auto (smart detection)
+    toastDetectionDelay: parseInt(process.env.MAGNITUDE_MCP_TOAST_DELAY || '500'),  // Default: 500ms
 };
 
 // Ensure profile directory exists
@@ -37,6 +39,7 @@ if (config.stealth) {
     console.log('Stealth mode enabled - warning banner may appear but anti-detection is improved');
 }
 console.log(`Selector-based actions: ${config.enableSelectors ? 'enabled' : 'disabled'}`);
+console.log(`Toast detection: ${config.toastDetectionMode} (delay: ${config.toastDetectionDelay}ms)`);
 console.log(`Console monitoring: ${config.enableConsoleMonitoring ? 'enabled' : 'disabled'} (limit: ${config.consoleLogLimit})`);
 console.log(`Network monitoring: ${config.enableNetworkMonitoring ? 'enabled' : 'disabled'} (limit: ${config.networkRequestLimit})`);
 
@@ -368,7 +371,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     enableConsoleMonitoring: config.enableConsoleMonitoring,
                     enableNetworkMonitoring: config.enableNetworkMonitoring,
                     consoleLogLimit: config.consoleLogLimit,
-                    networkRequestLimit: config.networkRequestLimit
+                    networkRequestLimit: config.networkRequestLimit,
+                    toastDetectionMode: config.toastDetectionMode,
+                    toastDetectionDelay: config.toastDetectionDelay
                 });
                 await harness.start();
 
