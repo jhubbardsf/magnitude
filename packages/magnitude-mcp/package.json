@@ -61,7 +61,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.0",
     "patchright": "^1.49.0",
-    "magnitude-core": "^0.3.0",
+    "magnitude-core": "workspace:*",
     "zod": "^3.24.2",
     "zod-to-json-schema": "^3.24.5"
   },

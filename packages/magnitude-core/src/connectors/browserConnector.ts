@@ -35,6 +35,13 @@ export interface BrowserConnectorOptions {
     virtualScreenDimensions?: { width: number, height: number },
     minScreenshots?: number,
     visuals?: ActionVisualizerOptions
+    enableConsoleMonitoring?: boolean  // Whether to capture console logs (default: true)
+    enableNetworkMonitoring?: boolean  // Whether to capture network requests (default: true)
+    consoleLogLimit?: number  // Maximum console logs to retain (default: 500, minimum: 10)
+    networkRequestLimit?: number  // Maximum network requests to retain (default: 100, minimum: 10)
+    enableSelectors?: boolean  // Whether to enable Playwright selector-based actions (default: false)
+    toastDetectionMode?: 'auto' | 'always' | 'never'  // Toast detection mode (default: 'auto')
+    toastDetectionDelay?: number  // Delay in ms to wait for toasts (default: 500)
 }
 
 export interface BrowserConnectorStateData {
@@ -72,7 +79,13 @@ export class BrowserConnector implements AgentConnector {
         this.harness = new WebHarness(this.context, {
             //fallbackViewportDimensions: contextOptions?.viewport ?? { width: 1024, height: 768 },
             virtualScreenDimensions: this.options.virtualScreenDimensions,
-            visuals: this.options.visuals
+            visuals: this.options.visuals,
+            enableConsoleMonitoring: this.options.enableConsoleMonitoring,
+            enableNetworkMonitoring: this.options.enableNetworkMonitoring,
+            consoleLogLimit: this.options.consoleLogLimit,
+            networkRequestLimit: this.options.networkRequestLimit,
+            toastDetectionMode: this.options.toastDetectionMode,
+            toastDetectionDelay: this.options.toastDetectionDelay
         });
         await this.harness.start();
         this.logger.info("WebHarness started.");
@@ -176,10 +189,129 @@ export class BrowserConnector implements AgentConnector {
                 { type: 'tabinfo', limit: 1 }
             )
         );
+
+        // Detect and include toast notifications
+        const toasts = await this.harness.getToasts();
+        if (toasts.length > 0) {
+            const toastInfo = toasts.map(t => {
+                const icon = t.type === 'success' ? '🟢' : t.type === 'error' ? '🔴' : t.type === 'warning' ? '🟡' : 'ℹ️';
+                return `${icon} Toast: ${t.text}`;
+            }).join('\n');
+
+            observations.push(
+                Observation.fromConnector(
+                    this.id,
+                    toastInfo,
+                    { type: 'toast', limit: 3 }  // Keep last 3 toasts
+                )
+            );
+        }
+
+        // Check network responses after actions (proactive error detection)
+        const networkRequests = this.harness.getNetworkRequests(false);
+        const recentRequests = networkRequests.slice(-5);  // Last 5 requests
+        const failures = recentRequests.filter(r => r.status && r.status >= 400);
+
+        if (failures.length > 0) {
+            const failureInfo = failures.map(f =>
+                `⚠️ Network: ${f.method} ${f.url} returned ${f.status} ${f.statusText}`
+            ).join('\n');
+
+            observations.push(
+                Observation.fromConnector(
+                    this.id,
+                    failureInfo,
+                    { type: 'network-errors', limit: 2 }
+                )
+            );
+        }
+
         return observations;
     }
 
     async getInstructions(): Promise<void | string> {
-        return;
+        const enableConsole = this.options.enableConsoleMonitoring ?? true;
+        const enableNetwork = this.options.enableNetworkMonitoring ?? true;
+        const enableSelectors = this.options.enableSelectors ?? false;
+
+        // Only provide instructions for enabled features
+        const sections = [];
+
+        if (enableSelectors) {
+            sections.push(`## Playwright Selector-Based Actions
+
+You have access to reliable Playwright-style selectors for interacting with elements. These are MUCH more reliable than visual clicking for forms, buttons, and standard interactive elements.
+
+**Available selector actions:**
+- \`click_text(text)\` - Click element containing text (most useful for buttons, links)
+- \`click_role(role, name?)\` - Click by ARIA role (button, link, textbox, checkbox, radio)
+- \`click_selector(selector)\` - Click by CSS selector (#id, .class, etc.)
+- \`click_testid(testid)\` - Click by data-testid attribute
+- \`fill_by_label(label, value)\` - Fill input by its label text
+- \`fill_by_placeholder(placeholder, value)\` - Fill input by placeholder text
+- \`fill_selector(selector, value)\` - Fill input by CSS selector
+
+**When to use selector actions:**
+- Forms with labels/placeholders - use fill_by_label or fill_by_placeholder
+- Buttons with text - use click_text
+- Standard UI elements - use click_role
+- Known selectors - use click_selector
+
+**When to use visual actions:**
+- Exploring unknown interfaces
+- Complex visual layouts
+- Canvas or image-based UIs
+- Custom components without semantic markup
+
+Use selector actions PREFERENTIALLY for reliability and speed when elements have known text, labels, or roles.`);
+        }
+
+        sections.push(`## Page Content Inspection
+- You can retrieve the full HTML content of any page to inspect DOM structure, find specific elements, and understand the page layout
+- You can access the accessibility tree which provides a structured view of interactive elements with their roles, names, and states
+- Use these when you need to locate specific elements reliably (e.g., forms, buttons, inputs) or verify page structure
+
+## Toast Notifications & Feedback
+- Toast notifications (success/error messages) are automatically detected and shown with each observation
+- Pay close attention to toasts as they indicate whether your actions succeeded or failed
+- Format: "🟢 Toast: Action successful!" or "🔴 Toast: Error message"
+- If you see an error toast, adjust your approach accordingly
+
+## Network Response Monitoring
+- Failed network requests (4xx/5xx) are automatically highlighted
+- After form submissions or critical actions, check for network errors
+- Format: "⚠️ Network: POST /api/register returned 400 Bad Request"
+- Network failures often explain why visual feedback is missing`);
+
+
+        if (enableConsole) {
+            sections.push(`## Console Monitoring
+- Browser console messages (logs, errors, warnings) are automatically captured
+- Use this to debug JavaScript errors, check for console warnings, or verify that expected logs appear
+- Particularly useful for debugging why interactions might be failing or for test assertions`);
+        }
+
+        if (enableNetwork) {
+            sections.push(`## Network Monitoring
+- All network requests are automatically tracked including URLs, methods, status codes, and headers
+- Use this to verify API calls are being made correctly, check response statuses, or debug loading issues
+- Helpful for ensuring data is being fetched/submitted properly during test flows`);
+        }
+
+        // Build best practices based on enabled features
+        const bestPractices = [
+            '- When form filling fails or elements are hard to locate visually, inspect the HTML/accessibility tree first'
+        ];
+        if (enableConsole) {
+            bestPractices.push('- If interactions seem to fail silently, check console logs for JavaScript errors');
+        }
+        if (enableNetwork) {
+            bestPractices.push('- For data submission flows, verify network requests to confirm data is being sent correctly');
+        }
+        bestPractices.push('- These inspection tools are faster and more reliable than trying to visually locate elements in screenshots');
+
+        sections.push(`## Best Practices\n${bestPractices.join('\n')}`);
+
+        return `You have access to advanced browser inspection capabilities beyond just screenshots:\n\n${sections.join('\n\n')}`;
     }
 }

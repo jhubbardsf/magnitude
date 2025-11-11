@@ -18,8 +18,15 @@ import { homedir } from 'os';
 const config = {
     profileDir: process.env.MAGNITUDE_MCP_PROFILE_DIR || path.join(homedir(), '.magnitude', 'profiles', 'default'),
     stealth: !!process.env.MAGNITUDE_MCP_STEALTH,  // Enable stealth mode (shows warning banner but better anti-detection)
-    viewportWidth: parseInt(process.env.MAGNITUDE_MCP_VIEWPORT_WIDTH || '1024'),
-    viewportHeight: parseInt(process.env.MAGNITUDE_MCP_VIEWPORT_HEIGHT || '768'),
+    viewportWidth: parseInt(process.env.MAGNITUDE_MCP_VIEWPORT_WIDTH || '950'),
+    viewportHeight: parseInt(process.env.MAGNITUDE_MCP_VIEWPORT_HEIGHT || '720'),
+    enableConsoleMonitoring: process.env.MAGNITUDE_MCP_ENABLE_CONSOLE !== 'false',  // Default: true
+    enableNetworkMonitoring: process.env.MAGNITUDE_MCP_ENABLE_NETWORK !== 'false',  // Default: true
+    consoleLogLimit: Math.max(10, parseInt(process.env.MAGNITUDE_MCP_CONSOLE_LOG_LIMIT || '500')),  // Default: 500, minimum: 10
+    networkRequestLimit: Math.max(10, parseInt(process.env.MAGNITUDE_MCP_NETWORK_REQUEST_LIMIT || '100')),  // Default: 100, minimum: 10
+    enableSelectors: process.env.MAGNITUDE_MCP_ENABLE_SELECTORS === 'true',  // Default: false, enables playwright selector-based actions
+    toastDetectionMode: (process.env.MAGNITUDE_MCP_TOAST_DETECTION as 'auto' | 'always' | 'never') || 'auto',  // Default: auto (smart detection)
+    toastDetectionDelay: parseInt(process.env.MAGNITUDE_MCP_TOAST_DELAY || '500'),  // Default: 500ms
 };
 
 // Ensure profile directory exists
@@ -31,6 +38,10 @@ console.log(`Using browser profile directory: ${config.profileDir}`);
 if (config.stealth) {
     console.log('Stealth mode enabled - warning banner may appear but anti-detection is improved');
 }
+console.log(`Selector-based actions: ${config.enableSelectors ? 'enabled' : 'disabled'}`);
+console.log(`Toast detection: ${config.toastDetectionMode} (delay: ${config.toastDetectionDelay}ms)`);
+console.log(`Console monitoring: ${config.enableConsoleMonitoring ? 'enabled' : 'disabled'} (limit: ${config.consoleLogLimit})`);
+console.log(`Network monitoring: ${config.enableNetworkMonitoring ? 'enabled' : 'disabled'} (limit: ${config.networkRequestLimit})`);
 
 // Action schemas with discriminated union
 const ClickActionSchema = z.object({
@@ -94,6 +105,60 @@ const KeyPressActionSchema = z.object({
     key: z.enum(['Enter', 'Tab', 'Backspace'])
 });
 
+const CopyActionSchema = z.object({
+    type: z.literal('copy')
+});
+
+const PasteActionSchema = z.object({
+    type: z.literal('paste')
+});
+
+const SetClipboardActionSchema = z.object({
+    type: z.literal('set_clipboard'),
+    text: z.string()
+});
+
+// Playwright selector-based action schemas
+const ClickTextActionSchema = z.object({
+    type: z.literal('click_text'),
+    text: z.string(),
+    exact: z.boolean().optional()
+});
+
+const ClickRoleActionSchema = z.object({
+    type: z.literal('click_role'),
+    role: z.enum(['button', 'link', 'textbox', 'checkbox', 'radio']),
+    name: z.string().optional()
+});
+
+const ClickSelectorActionSchema = z.object({
+    type: z.literal('click_selector'),
+    selector: z.string()
+});
+
+const ClickTestIdActionSchema = z.object({
+    type: z.literal('click_testid'),
+    testId: z.string()
+});
+
+const FillByLabelActionSchema = z.object({
+    type: z.literal('fill_by_label'),
+    label: z.string(),
+    value: z.string()
+});
+
+const FillByPlaceholderActionSchema = z.object({
+    type: z.literal('fill_by_placeholder'),
+    placeholder: z.string(),
+    value: z.string()
+});
+
+const FillSelectorActionSchema = z.object({
+    type: z.literal('fill_selector'),
+    selector: z.string(),
+    value: z.string()
+});
+
 const ActionSchema = z.discriminatedUnion('type', [
     ClickActionSchema,
     RightClickActionSchema,
@@ -104,7 +169,17 @@ const ActionSchema = z.discriminatedUnion('type', [
     SwitchTabActionSchema,
     NewTabActionSchema,
     NavigateActionSchema,
-    KeyPressActionSchema
+    KeyPressActionSchema,
+    CopyActionSchema,
+    PasteActionSchema,
+    SetClipboardActionSchema,
+    ClickTextActionSchema,
+    ClickRoleActionSchema,
+    ClickSelectorActionSchema,
+    ClickTestIdActionSchema,
+    FillByLabelActionSchema,
+    FillByPlaceholderActionSchema,
+    FillSelectorActionSchema
 ]);
 
 const ConnectBrowserSchema = z.object({
@@ -151,6 +226,23 @@ const server = new Server(
 
 // List tools handler
 server.setRequestHandler(ListToolsRequestSchema, async () => {
+    // Build act description based on enabled features
+    let actDescription = 'Perform actions in the browser. Combine multiple actions at the same time for efficiency.';
+
+    if (config.enableSelectors) {
+        actDescription += '\n\nSelector-based actions available (more reliable for forms and buttons):';
+        actDescription += '\n- click_text: Click element by text content';
+        actDescription += '\n- click_role: Click by ARIA role (button, link, etc.)';
+        actDescription += '\n- click_selector: Click by CSS selector';
+        actDescription += '\n- click_testid: Click by data-testid';
+        actDescription += '\n- fill_by_label: Fill input by label text';
+        actDescription += '\n- fill_by_placeholder: Fill input by placeholder';
+        actDescription += '\n- fill_selector: Fill input by CSS selector';
+        actDescription += '\n\nUse these preferentially for forms, buttons, and interactive elements with known text/attributes.';
+    }
+
+    actDescription += '\n\nThe blue cursor represents the last position you interacted with, however it may sometimes be missing or misplaced even after a successful interaction.';
+
     return {
         tools: [
             {
@@ -160,7 +252,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: 'act',
-                description: 'Perform actions in the browser. Combine multiple actions at the same time for efficiency. The blue cursor represents the last position you interacted with, however it may sometimes be missing or misplaced even after a successful interaction.',
+                description: actDescription,
                 inputSchema: zodToJsonSchema(ActSchema),
             },
             {
@@ -169,6 +261,48 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 inputSchema: {
                     type: 'object',
                     properties: {},
+                },
+            },
+            {
+                name: 'get_page_html',
+                description: 'Get the full HTML content of the current page',
+                inputSchema: {
+                    type: 'object',
+                    properties: {},
+                },
+            },
+            {
+                name: 'get_accessibility_tree',
+                description: 'Get the accessibility tree of the current page, useful for finding elements and understanding page structure',
+                inputSchema: {
+                    type: 'object',
+                    properties: {},
+                },
+            },
+            {
+                name: 'get_console_logs',
+                description: 'Get console messages from the browser. Optionally clear the log buffer after retrieving.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        clear: {
+                            type: 'boolean',
+                            description: 'Whether to clear the console log buffer after retrieving (default: false)',
+                        },
+                    },
+                },
+            },
+            {
+                name: 'get_network_requests',
+                description: 'Get network requests made by the page. Optionally clear the request buffer after retrieving.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        clear: {
+                            type: 'boolean',
+                            description: 'Whether to clear the network request buffer after retrieving (default: false)',
+                        },
+                    },
                 },
             },
         ],
@@ -233,7 +367,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 // Use Claude's virtual screen dimensions since we do not know that model might use the MCP server
                 harness = new WebHarness(context, {
                     virtualScreenDimensions: { width: 1024, height: 768 },
-                    switchTabsOnActivity: true // detect user activity in the browser to try and keep active tab in sync
+                    switchTabsOnActivity: true, // detect user activity in the browser to try and keep active tab in sync
+                    enableConsoleMonitoring: config.enableConsoleMonitoring,
+                    enableNetworkMonitoring: config.enableNetworkMonitoring,
+                    consoleLogLimit: config.consoleLogLimit,
+                    networkRequestLimit: config.networkRequestLimit,
+                    toastDetectionMode: config.toastDetectionMode,
+                    toastDetectionDelay: config.toastDetectionDelay
                 });
                 await harness.start();
 
@@ -304,6 +444,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             else if (action.key.toLowerCase() === 'tab') await harness.tab();
                             else if (action.key.toLowerCase() === 'backspace') await harness.backspace();
                             break;
+                        case 'copy':
+                            await harness.copy();
+                            break;
+                        case 'paste':
+                            await harness.paste();
+                            break;
+                        case 'set_clipboard':
+                            await harness.setClipboard(action.text);
+                            break;
+                        case 'click_text':
+                            await harness.clickText(action.text, { exact: action.exact });
+                            break;
+                        case 'click_role':
+                            await harness.clickRole(action.role, action.name);
+                            break;
+                        case 'click_selector':
+                            await harness.clickSelector(action.selector);
+                            break;
+                        case 'click_testid':
+                            await harness.clickTestId(action.testId);
+                            break;
+                        case 'fill_by_label':
+                            await harness.fillByLabel(action.label, action.value);
+                            break;
+                        case 'fill_by_placeholder':
+                            await harness.fillByPlaceholder(action.placeholder, action.value);
+                            break;
+                        case 'fill_selector':
+                            await harness.fillSelector(action.selector, action.value);
+                            break;
                         default:
                             throw new Error(`Unknown action type: ${(action as any).type}`);
                     }
@@ -344,6 +514,60 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             mimeType: 'image/png'
                         }
                     ]
+                };
+            }
+
+            case 'get_page_html': {
+                if (!harness) {
+                    throw new Error('No browser connected. Use open_browser first.');
+                }
+                const html = await harness.getPageHTML();
+                return {
+                    content: [{
+                        type: 'text',
+                        text: html
+                    }]
+                };
+            }
+
+            case 'get_accessibility_tree': {
+                if (!harness) {
+                    throw new Error('No browser connected. Use open_browser first.');
+                }
+                const tree = await harness.getAccessibilityTree();
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify(tree, null, 2)
+                    }]
+                };
+            }
+
+            case 'get_console_logs': {
+                if (!harness) {
+                    throw new Error('No browser connected. Use open_browser first.');
+                }
+                const clear = (args as any)?.clear ?? false;
+                const logs = harness.getConsoleLogs(clear);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify(logs, null, 2)
+                    }]
+                };
+            }
+
+            case 'get_network_requests': {
+                if (!harness) {
+                    throw new Error('No browser connected. Use open_browser first.');
+                }
+                const clear = (args as any)?.clear ?? false;
+                const requests = harness.getNetworkRequests(clear);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify(requests, null, 2)
+                    }]
                 };
             }
 

@@ -87,3 +87,64 @@ The agent knows about and sees:
 - History of its own actions from the same `act()`
 - All currently open tabs
 - Which tab is active
+
+## Advanced Inspection Capabilities
+
+Beyond screenshots, Magnitude agents can inspect the page's internal state for more reliable automation:
+
+### Console Monitoring
+
+All console messages (logs, errors, warnings) are automatically captured. The last 500 entries are kept by default.
+
+**Use cases:**
+- Debug JavaScript errors during test execution
+- Verify expected console output
+- Detect unexpected warnings
+
+```ts
+const harness = agent.getHarness();
+const logs = harness.getConsoleLogs();
+const errors = logs.filter(l => l.type === 'error');
+console.log('Found errors:', errors);
+```
+
+### Network Monitoring
+
+All network requests are tracked with URLs, methods, status codes, and headers. The last 100 requests are kept by default.
+
+**Use cases:**
+- Verify API calls are made correctly
+- Debug loading issues
+- Assert on response statuses in tests
+
+```ts
+const harness = agent.getHarness();
+const requests = harness.getNetworkRequests();
+const apiCalls = requests.filter(r => r.url.includes('/api/'));
+console.log('API calls made:', apiCalls.length);
+```
+
+### DOM Inspection
+
+Access full HTML content and accessibility tree for precise element location and verification.
+
+**Use cases:**
+- Locate elements reliably without visual coordinates
+- Verify page structure in tests
+- Extract data from complex DOMs
+
+```ts
+const harness = agent.getHarness();
+
+// Get full HTML
+const html = await harness.getPageHTML();
+console.log(html.includes('<form id="login">'));
+
+// Get accessibility tree
+const a11yTree = await harness.getAccessibilityTree();
+console.log('Interactive elements:', a11yTree);
+```
+
+<Note>
+Configure limits for console logs and network requests via `BrowserConnectorOptions` when creating the agent. See [BrowserAgent reference](/reference/browser-agent#getharness) for details.
+</Note>

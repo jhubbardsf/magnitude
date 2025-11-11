@@ -80,6 +80,41 @@ Any step descriptions, checks, or data are represented in natural language. You 
 
 For more examples see the [examples folder](./examples).
 
+## Advanced Testing with Inspection
+
+For local testing (not using the managed platform), you can access the browser harness for advanced assertions:
+
+```ts
+import { test } from 'magnitude-test';
+
+test('Login flow makes correct API call', async ({ agent }) => {
+  const harness = agent.getHarness();
+
+  // Perform login
+  await agent.act('Log in with test credentials');
+
+  // Verify API call was made
+  const requests = harness.getNetworkRequests();
+  const loginCall = requests.find(r => r.url.includes('/api/login'));
+
+  expect(loginCall).toBeDefined();
+  expect(loginCall?.status).toBe(200);
+
+  // Check for console errors
+  const logs = harness.getConsoleLogs();
+  const errors = logs.filter(l => l.type === 'error');
+  expect(errors).toHaveLength(0);
+});
+```
+
+**Available inspection methods:**
+- `getPageHTML()` - Full HTML content for DOM assertions
+- `getAccessibilityTree()` - Accessibility tree for structure verification
+- `getConsoleLogs()` - Console messages for debugging
+- `getNetworkRequests()` - Network requests for API verification
+
+See the [BrowserAgent reference](https://docs.magnitude.run/reference/browser-agent#getharness) for details.
+
 ## Tunneling
 
 Magnitude runs the browser and AI agent so you don't have to. In order to access locally running sites, a secure HTTP tunnel is established from our servers to your localhost when you specify a private URL (for example `localhost:3000` or `127.0.0.1`).

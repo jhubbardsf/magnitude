@@ -1,0 +1,230 @@
+import { GeneratedTestSuite, PlaywrightConfig, RecordedTest, GeneratedTest } from './types';
+import { PlaywrightCodeGenerator } from './codeGenerator';
+import * as fs from 'fs';
+import * as path from 'path';
+
+export class ScaffoldGenerator {
+    private codeGenerator: PlaywrightCodeGenerator;
+
+    constructor() {
+        this.codeGenerator = new PlaywrightCodeGenerator();
+    }
+
+    async generateSuite(tests: RecordedTest[], baseURL: string, outputDir: string): Promise<void> {
+        // Ensure output directory exists
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        // Create tests directory
+        const testsDir = path.join(outputDir, 'tests');
+        if (!fs.existsSync(testsDir)) {
+            fs.mkdirSync(testsDir, { recursive: true });
+        }
+
+        // Generate test files
+        for (const test of tests) {
+            const generated = this.codeGenerator.generateTest(test);
+            const testPath = path.join(testsDir, generated.filename);
+            fs.writeFileSync(testPath, generated.code);
+            console.log(`✓ Generated test: ${generated.filename}`);
+        }
+
+        // Generate scaffold files
+        await this.generateScaffoldFiles(baseURL, outputDir);
+    }
+
+    async generateFullSuite(generatedTests: GeneratedTest[], baseURL: string, outputDir: string): Promise<void> {
+        // Ensure output directory exists
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        // Create tests directory
+        const testsDir = path.join(outputDir, 'tests');
+        if (!fs.existsSync(testsDir)) {
+            fs.mkdirSync(testsDir, { recursive: true });
+        }
+
+        // Write test files
+        for (const test of generatedTests) {
+            const testPath = path.join(testsDir, test.filename);
+            fs.writeFileSync(testPath, test.code);
+            console.log(`✓ Generated test: ${test.filename}`);
+        }
+
+        // Generate scaffold files
+        await this.generateScaffoldFiles(baseURL, outputDir);
+    }
+
+    private async generateScaffoldFiles(baseURL: string, outputDir: string): Promise<void> {
+
+        // Generate playwright.config.ts
+        const config = this.generatePlaywrightConfig(baseURL);
+        const configPath = path.join(outputDir, 'playwright.config.ts');
+        fs.writeFileSync(configPath, config);
+        console.log(`✓ Generated playwright.config.ts`);
+
+        // Generate package.json
+        const packageJson = this.generatePackageJson();
+        const packagePath = path.join(outputDir, 'package.json');
+        fs.writeFileSync(packagePath, JSON.stringify(packageJson, null, 2));
+        console.log(`✓ Generated package.json`);
+
+        // Generate .gitignore
+        const gitignore = this.generateGitignore();
+        const gitignorePath = path.join(outputDir, '.gitignore');
+        fs.writeFileSync(gitignorePath, gitignore);
+        console.log(`✓ Generated .gitignore`);
+
+        // Generate README
+        const readme = this.generateReadme(baseURL);
+        const readmePath = path.join(outputDir, 'README.md');
+        fs.writeFileSync(readmePath, readme);
+        console.log(`✓ Generated README.md`);
+
+        console.log(`\n✨ Test suite generated in: ${outputDir}`);
+        console.log(`\nNext steps:`);
+        console.log(`  cd ${outputDir}`);
+        console.log(`  npm install`);
+        console.log(`  npx playwright install`);
+        console.log(`  npx playwright test`);
+    }
+
+    private generatePlaywrightConfig(baseURL: string): string {
+        return `import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: 'html',
+
+  use: {
+    baseURL: '${baseURL}',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
+
+  webServer: process.env.CI ? undefined : {
+    command: 'npm run dev',
+    url: '${baseURL}',
+    reuseExistingServer: !process.env.CI,
+  },
+});
+`;
+    }
+
+    private generatePackageJson(): any {
+        return {
+            name: 'generated-playwright-tests',
+            version: '1.0.0',
+            description: 'Auto-generated Playwright test suite by Magnitude',
+            scripts: {
+                test: 'playwright test',
+                'test:headed': 'playwright test --headed',
+                'test:ui': 'playwright test --ui',
+                'test:debug': 'playwright test --debug',
+                report: 'playwright show-report'
+            },
+            devDependencies: {
+                '@playwright/test': '^1.49.0',
+                '@types/node': '^20.17.30'
+            }
+        };
+    }
+
+    private generateGitignore(): string {
+        return `node_modules/
+test-results/
+playwright-report/
+playwright/.cache/
+.env
+.DS_Store
+`;
+    }
+
+    private generateReadme(baseURL: string): string {
+        return `# Auto-Generated Playwright Test Suite
+
+This test suite was automatically generated by [Magnitude](https://magnitude.run) Playwright Generator.
+
+## Getting Started
+
+### Install Dependencies
+
+\`\`\`bash
+npm install
+npx playwright install
+\`\`\`
+
+### Run Tests
+
+\`\`\`bash
+# Run all tests
+npm test
+
+# Run tests in headed mode (see browser)
+npm run test:headed
+
+# Run tests in UI mode (interactive)
+npm run test:ui
+
+# Debug a specific test
+npm run test:debug tests/login.spec.ts
+\`\`\`
+
+### View Reports
+
+\`\`\`bash
+npm run report
+\`\`\`
+
+## Configuration
+
+The test suite is configured in \`playwright.config.ts\` with:
+- Base URL: \`${baseURL}\`
+- Retries: 2 (in CI), 0 (locally)
+- Parallel execution enabled
+- Automatic screenshot on failure
+- Trace recording on first retry
+
+## Modifying Tests
+
+All test files are in the \`tests/\` directory. Each test is a standard Playwright test that you can modify, extend, or refactor as needed.
+
+### Test Structure
+
+\`\`\`typescript
+import { test, expect } from '@playwright/test';
+
+test.describe('Feature Name', () => {
+  test('should do something', async ({ page }) => {
+    await page.goto('/path');
+    await page.getByLabel('Email').fill('user@example.com');
+    await page.getByRole('button', { name: 'Submit' }).click();
+    await expect(page).toHaveURL('/success');
+  });
+});
+\`\`\`
+
+## Learn More
+
+- [Playwright Documentation](https://playwright.dev)
+- [Magnitude Documentation](https://docs.magnitude.run)
+
+---
+
+Generated by Magnitude Playwright Generator
+`;
+    }
+}

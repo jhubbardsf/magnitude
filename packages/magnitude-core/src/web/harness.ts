@@ -7,6 +7,8 @@ import logger from "@/logger";
 import { TabManager, TabState } from "./tabs";
 import { DOMTransformer } from "./transformer";
 import { Image } from '@/memory/image';
+import { ToastDetector } from "./toastDetector";
+import type { DetectedToast } from "./toastDetector";
 import EventEmitter from "eventemitter3";
 //import { StateComponent } from "@/facets";
 
@@ -17,6 +19,33 @@ export interface WebHarnessOptions {
     virtualScreenDimensions?: { width: number, height: number }
     visuals?: ActionVisualizerOptions
     switchTabsOnActivity?: boolean  // Whether to automatically switch tabs when user activity is detected vs only if switchTab is used
+    enableConsoleMonitoring?: boolean  // Whether to capture console logs (default: true)
+    enableNetworkMonitoring?: boolean  // Whether to capture network requests (default: true)
+    consoleLogLimit?: number  // Maximum console logs to retain (default: 500, minimum: 10)
+    networkRequestLimit?: number  // Maximum network requests to retain (default: 100, minimum: 10)
+    toastDetectionMode?: 'auto' | 'always' | 'never'  // Toast detection mode (default: 'auto')
+    toastDetectionDelay?: number  // Delay in ms to wait for toasts (default: 500, only used if mode='always' or toast capability detected)
+}
+
+export { DetectedToast };
+
+type ConsoleMessageType = 'log' | 'debug' | 'info' | 'error' | 'warning' | 'dir' | 'dirxml' | 'table' | 'trace' | 'clear' | 'startGroup' | 'startGroupCollapsed' | 'endGroup' | 'assert' | 'profile' | 'profileEnd' | 'count' | 'timeEnd';
+
+export interface ConsoleMessage {
+    type: ConsoleMessageType;
+    text: string;
+    timestamp: number;
+}
+
+export interface NetworkRequest {
+    url: string;
+    method: string;
+    status?: number;
+    statusText?: string;
+    resourceType: string;
+    timestamp: number;
+    requestHeaders?: Record<string, string>;
+    responseHeaders?: Record<string, string>;
 }
 
 export interface WebHarnessEvents {
@@ -34,6 +63,16 @@ export class WebHarness { // implements StateComponent
     public readonly visualizer: ActionVisualizer;
     private transformer: DOMTransformer;
     private tabs: TabManager;
+    private consoleLogs: ConsoleMessage[] = [];
+    private networkRequests: NetworkRequest[] = [];
+    private consoleLogLimit: number;
+    private networkRequestLimit: number;
+    private toastDetector: ToastDetector | null = null;
+    private cachedToasts: DetectedToast[] = [];  // Cache toasts after actions
+    private toastDetectionMode: 'auto' | 'always' | 'never';
+    private toastDetectionDelay: number;
+    private toastCapabilityChecked: boolean = false;
+    private hasToastCapability: boolean = false;
 
     public readonly events: EventEmitter<WebHarnessEvents> = new EventEmitter();
 
@@ -41,6 +80,15 @@ export class WebHarness { // implements StateComponent
         //this.page = page;
         this.context = context;
         this.options = options;
+
+        // Validate and set limits (minimum 10, defaults: 500 for console, 100 for network)
+        this.consoleLogLimit = Math.max(10, options.consoleLogLimit ?? 500);
+        this.networkRequestLimit = Math.max(10, options.networkRequestLimit ?? 100);
+
+        // Configure toast detection
+        this.toastDetectionMode = options.toastDetectionMode ?? 'auto';
+        this.toastDetectionDelay = options.toastDetectionDelay ?? 500;
+
         this.stability = new PageStabilityAnalyzer({ disableVisualStability: true });
         this.visualizer = new ActionVisualizer(this.context, this.options.visuals ?? {});
         this.transformer = new DOMTransformer();
@@ -67,7 +115,64 @@ export class WebHarness { // implements StateComponent
         this.stability.setActivePage(page);
         await this.visualizer.setActivePage(page);
         this.transformer.setActivePage(page);
+        this.setupPageListeners(page);
+
+        // Initialize toast detector for this page
+        if (this.toastDetectionMode !== 'never') {
+            this.toastDetector = new ToastDetector(page);
+            // Reset capability check for new page
+            this.toastCapabilityChecked = false;
+            this.hasToastCapability = false;
+        }
+
         this.events.emit('activePageChanged', page);
+    }
+
+    private setupPageListeners(page: Page) {
+        const enableConsole = this.options.enableConsoleMonitoring ?? true;
+        const enableNetwork = this.options.enableNetworkMonitoring ?? true;
+
+        // Console listener with circular buffer
+        if (enableConsole) {
+            page.on('console', (msg) => {
+                // Implement circular buffer: remove oldest if at limit
+                if (this.consoleLogs.length >= this.consoleLogLimit) {
+                    this.consoleLogs.shift();
+                }
+                this.consoleLogs.push({
+                    type: msg.type() as ConsoleMessage['type'],
+                    text: msg.text(),
+                    timestamp: Date.now()
+                });
+            });
+        }
+
+        // Network listeners with circular buffer
+        if (enableNetwork) {
+            page.on('request', (request) => {
+                // Implement circular buffer: remove oldest if at limit
+                if (this.networkRequests.length >= this.networkRequestLimit) {
+                    this.networkRequests.shift();
+                }
+                const networkRequest: NetworkRequest = {
+                    url: request.url(),
+                    method: request.method(),
+                    resourceType: request.resourceType(),
+                    timestamp: Date.now(),
+                    requestHeaders: request.headers()
+                };
+                this.networkRequests.push(networkRequest);
+            });
+
+            page.on('response', async (response) => {
+                const request = this.networkRequests.find(r => r.url === response.url() && !r.status);
+                if (request) {
+                    request.status = response.status();
+                    request.statusText = response.statusText();
+                    request.responseHeaders = response.headers();
+                }
+            });
+        }
     }
 
     async retrieveTabState(): Promise<TabState> {
@@ -384,6 +489,62 @@ export class WebHarness { // implements StateComponent
         await this.page.keyboard.press('Tab')
     }
 
+    async copy() {
+        await this.page.keyboard.down('ControlOrMeta');
+        await this.page.keyboard.press('KeyC');
+        await this.page.keyboard.up('ControlOrMeta');
+    }
+
+    async paste() {
+        await this.page.keyboard.down('ControlOrMeta');
+        await this.page.keyboard.press('KeyV');
+        await this.page.keyboard.up('ControlOrMeta');
+    }
+
+    async setClipboard(text: string) {
+        await this.page.evaluate((text) => {
+            navigator.clipboard.writeText(text);
+        }, text);
+    }
+
+    // Playwright selector-based methods (Mode 2: fast but potentially detectable)
+    async clickText(text: string, options?: { exact?: boolean }) {
+        const element = this.page.getByText(text, { exact: options?.exact });
+        await element.click();
+        await this.waitForStability();
+    }
+
+    async clickRole(role: 'button' | 'link' | 'textbox' | 'checkbox' | 'radio', name?: string) {
+        const element = name ? this.page.getByRole(role, { name }) : this.page.getByRole(role);
+        await element.click();
+        await this.waitForStability();
+    }
+
+    async clickSelector(selector: string) {
+        await this.page.locator(selector).click();
+        await this.waitForStability();
+    }
+
+    async clickTestId(testId: string) {
+        await this.page.getByTestId(testId).click();
+        await this.waitForStability();
+    }
+
+    async fillByLabel(label: string, value: string) {
+        await this.page.getByLabel(label).fill(value);
+        await this.waitForStability();
+    }
+
+    async fillByPlaceholder(placeholder: string, value: string) {
+        await this.page.getByPlaceholder(placeholder).fill(value);
+        await this.waitForStability();
+    }
+
+    async fillSelector(selector: string, value: string) {
+        await this.page.locator(selector).fill(value);
+        await this.waitForStability();
+    }
+
     async goBack() {
         await this.page.goBack();
     }
@@ -406,6 +567,101 @@ export class WebHarness { // implements StateComponent
 
     async waitForStability(timeout?: number): Promise<void> {
         await this.stability.waitForStability(timeout);
+
+        // Smart toast detection
+        if (this.toastDetectionMode === 'never') {
+            return;  // Skip entirely
+        }
+
+        if (!this.toastDetector) {
+            return;  // No detector available
+        }
+
+        // Auto mode: Check capability first (only once per page)
+        if (this.toastDetectionMode === 'auto') {
+            if (!this.toastCapabilityChecked) {
+                this.hasToastCapability = await this.toastDetector.detectToastCapability();
+                this.toastCapabilityChecked = true;
+
+                if (this.hasToastCapability) {
+                    logger.trace('Toast capability detected on this page');
+                } else {
+                    logger.trace('No toast capability detected, skipping delays');
+                }
+            }
+
+            if (!this.hasToastCapability) {
+                return;  // No toasts on this page, skip delay
+            }
+        }
+
+        // Mode is 'always' OR auto detected toast capability
+        // Wait for toasts to render (they often animate in)
+        await this.page.waitForTimeout(this.toastDetectionDelay);
+
+        const toasts = await this.toastDetector.detectToasts();
+        if (toasts.length > 0) {
+            // Cache toasts so they're available for observations later
+            this.cachedToasts = toasts;
+            logger.trace(`Detected ${toasts.length} toast(s): ${toasts.map(t => t.text).join(', ')}`);
+        }
+    }
+
+    // Inspection methods
+    async getPageHTML(): Promise<string> {
+        return await this.page.content();
+    }
+
+    async getAccessibilityTree(): Promise<any> {
+        const snapshot = await this.page.accessibility.snapshot();
+        return snapshot;
+    }
+
+    getConsoleLogs(clear: boolean = false): ConsoleMessage[] {
+        const logs = [...this.consoleLogs];
+        if (clear) {
+            this.consoleLogs = [];
+        }
+        return logs;
+    }
+
+    getNetworkRequests(clear: boolean = false): NetworkRequest[] {
+        const requests = [...this.networkRequests];
+        if (clear) {
+            this.networkRequests = [];
+        }
+        return requests;
+    }
+
+    clearConsoleLogs(): void {
+        this.consoleLogs = [];
+    }
+
+    clearNetworkRequests(): void {
+        this.networkRequests = [];
+    }
+
+    async getToasts(): Promise<DetectedToast[]> {
+        // Return cached toasts from last action/stability check
+        const toasts = [...this.cachedToasts];
+        this.cachedToasts = [];  // Clear after reading
+        return toasts;
+    }
+
+    isConsoleMonitoringEnabled(): boolean {
+        return this.options.enableConsoleMonitoring ?? true;
+    }
+
+    isNetworkMonitoringEnabled(): boolean {
+        return this.options.enableNetworkMonitoring ?? true;
+    }
+
+    isToastDetectionEnabled(): boolean {
+        return this.toastDetectionMode !== 'never';
+    }
+
+    getToastDetectionMode(): 'auto' | 'always' | 'never' {
+        return this.toastDetectionMode;
     }
 
     // async applyTransformations() {
